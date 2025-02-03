@@ -2,9 +2,16 @@
 
 pub use pallet::*;
 
+#[cfg(test)]
+mod mock;
+
+#[cfg(test)]
+mod tests;
+
 pub mod weights;
 pub use weights::*;
 
+#[allow(deprecated)]
 #[frame_support::pallet]
 pub mod pallet {
 
@@ -55,20 +62,20 @@ pub mod pallet {
     /// Estrutura que representa um item de venda, incluindo o ID do produto e a quantidade vendida.
     #[derive(Clone, Encode, Decode, Debug, PartialEq, TypeInfo)]
     pub struct ItemSale {
-        product_id: u64,
-        amount: u64
+        pub product_id: u64,
+        pub amount: u64
     }
 
     /// Estrutura que define as propriedades de um produto.
     #[derive(Clone, Debug, Encode, Decode, PartialEq, TypeInfo)]
     pub struct Product {
-        name: Vec<u8>,                  // Nome do produto
-        id: u64,                         // ID único do produto
-        stock: u64,                      // Quantidade em estoque
-        price: u64,                      // Preço do produto
-        amount_to_restock: u64,          // Quantidade a ser reabastecida
-        restock_date: Date,              // Data do próximo reabastecimento
-        category: Category               // Categoria do produto
+        pub name: Vec<u8>,
+        id: u64,
+        pub stock: u64,
+        pub price: u64,
+        pub amount_to_restock: u64,
+        pub restock_date: Date,
+        pub category: Category
     }
 
     impl MaxEncodedLen for Product {
@@ -84,12 +91,12 @@ pub mod pallet {
     /// Estrutura que representa uma venda, incluindo o vendedor, código da venda, lista de produtos, valor total, data e método de pagamento.
     #[derive(Clone, Debug, Encode, Decode, PartialEq, TypeInfo)]
     pub struct Sale {
-        seller: Vec<u8>,                 // Nome do vendedor
-        code: u64,                        // Código único da venda
-        products: Vec<u64>,               // IDs dos produtos vendidos
-        value: u64,                       // Valor total da venda
-        date: Date,                       // Data da venda
-        payment_method: PaymentMethod     // Método de pagamento
+        pub seller: Vec<u8>,
+        code: u64,
+        pub products: Vec<u64>,
+        pub value: u64,
+        date: Date,
+        payment_method: PaymentMethod
     }
 
     impl MaxEncodedLen for Sale {
@@ -134,21 +141,21 @@ pub mod pallet {
     #[pallet::getter(fn next_sale_code)]
     pub type NextSaleCode<T> = StorageValue<_, u64, ValueQuery>;
 
-    /// Enumeração de eventos que podem ser gerados durante a execução do pallet.
-    #[pallet::event]
-    #[pallet::generate_deposit(pub(super) fn deposit_event)]
-    pub enum Event<T: Config> {
-        ProductAdded(u64),           // Produto adicionado
-        ProductGotten(Product),      // Produto obtido
-        ProductsListed(Vec<Product>),// Produtos listados
-        ProductUpdated(u64),         // Produto atualizado
-        ProductRemoved(u64),         // Produto removido
-        SaleRegistered(u64),         // Venda registrada
-        SaleGotten(Sale),            // Venda obtida
-        SalesListed(Vec<Sale>),      // Vendas listadas
-        SaleUpdated(u64),            // Venda atualizada
-        SaleRemoved(u64)             // Venda removida
-    }
+	#[pallet::event]
+	#[pallet::generate_deposit(pub(super) fn deposit_event)]
+	pub enum Event<T: Config> {
+		ProductAdded(u64),
+		ProductGotten(Product),
+        ProductsToRestock(Vec<Product>),
+		ProductsListed(Vec<Product>),
+		ProductUpdated(u64),
+        ProductRemoved(u64),
+        SaleRegistered(u64),
+		SaleGotten(Sale),
+		SalesListed(Vec<Sale>),
+        SaleUpdated(u64),
+        SaleRemoved(u64)
+	}
 
     /// Enumeração de erros que podem ocorrer durante a execução do pallet.
     #[pallet::error]
@@ -210,11 +217,30 @@ pub mod pallet {
             }
         }
 
-        /// Função para listar todos os produtos registrados.
         #[pallet::call_index(2)]
-        #[pallet::weight(10_000)]
-        pub fn list_all_products(origin: OriginFor<T>) -> DispatchResult {
-            let _who = ensure_signed(origin)?;
+		#[pallet::weight(10_000)]
+		pub fn list_products_to_restock(origin: OriginFor<T>) -> DispatchResult {
+			let _who = ensure_signed(origin)?;
+
+			let products: Vec<Product> = Products::<T>::iter()
+            .filter_map(|(_, product)| {
+                if product.stock < product.amount_to_restock {
+                    Some(product)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+			Self::deposit_event(Event::ProductsToRestock(products));
+
+			Ok(())
+		}
+
+		#[pallet::call_index(3)]
+		#[pallet::weight(10_000)]
+		pub fn list_all_products(origin: OriginFor<T>) -> DispatchResult {
+			let _who = ensure_signed(origin)?;
 
             // Obtenção de todos os produtos e emissão do evento
             let products: Vec<Product> = Products::<T>::iter().map(|(_, product)| product).collect();
@@ -223,9 +249,8 @@ pub mod pallet {
             Ok(())
         }
 
-        /// Função para atualizar um produto existente.
-        #[pallet::call_index(3)]
-        #[pallet::weight(10_000)]
+        #[pallet::call_index(4)]
+		#[pallet::weight(10_000)]
         pub fn update_product(origin: OriginFor<T>, id: u64, name: Option<Vec<u8>>, stock: Option<u64>, price: Option<u64>, amount_to_restock: Option<u64>, restock_date: Option<Date>, category: Option<Category>) -> DispatchResult {
             let _who = ensure_signed(origin)?;
 
@@ -250,7 +275,8 @@ pub mod pallet {
             }
 
             if let Some(new_restock_date) = restock_date {
-                product.restock_date = new_restock_date;
+                let new_date = Date::new(new_restock_date.day, new_restock_date.month, new_restock_date.year).map_err(|_| Error::<T>::InvalidDate)?;
+                product.restock_date = new_date;
             }
 
             if let Some(new_category) = category {
@@ -264,9 +290,8 @@ pub mod pallet {
             Ok(())
         }
 
-        /// Função para remover um produto.
-        #[pallet::call_index(4)]
-        #[pallet::weight(10_000)]
+        #[pallet::call_index(5)]
+		#[pallet::weight(10_000)]
         pub fn remove_product(origin: OriginFor<T>, id: u64) -> DispatchResult {
             let _who = ensure_signed(origin)?;
 
@@ -279,9 +304,8 @@ pub mod pallet {
             Ok(())
         }
 
-        /// Função para registrar uma venda.
-        #[pallet::call_index(5)]
-        #[pallet::weight(10_000)]
+        #[pallet::call_index(6)]
+		#[pallet::weight(10_000)]
         pub fn register_sale(origin: OriginFor<T>, seller: Vec<u8>, products: Vec<ItemSale>, payment_method: PaymentMethod) -> DispatchResult {
             let _who = ensure_signed(origin)?;
 
@@ -320,11 +344,10 @@ pub mod pallet {
             Ok(())
         }
 
-        /// Função para obter uma venda pelo código.
-        #[pallet::call_index(6)]
-        #[pallet::weight(10_000)]
-        pub fn get_sale(origin: OriginFor<T>, code: u64) -> DispatchResult {
-            let _who = ensure_signed(origin)?;
+		#[pallet::call_index(7)]
+		#[pallet::weight(10_000)]
+		pub fn get_sale(origin: OriginFor<T>, code: u64) -> DispatchResult {
+			let _who = ensure_signed(origin)?;
 
             if let Some(sale) = Sales::<T>::get(code) {
                 Self::deposit_event(Event::SaleGotten(sale));
@@ -334,11 +357,10 @@ pub mod pallet {
             }
         }
 
-        /// Função para listar todas as vendas registradas.
-        #[pallet::call_index(7)]
-        #[pallet::weight(10_000)]
-        pub fn list_all_sales(origin: OriginFor<T>) -> DispatchResult {
-            let _who = ensure_signed(origin)?;
+		#[pallet::call_index(8)]
+		#[pallet::weight(10_000)]
+		pub fn list_all_sales(origin: OriginFor<T>) -> DispatchResult {
+			let _who = ensure_signed(origin)?;
 
             // Obtenção de todas as vendas e emissão do evento
             let sales: Vec<Sale> = Sales::<T>::iter().map(|(_, sale)| sale).collect();
@@ -347,9 +369,8 @@ pub mod pallet {
             Ok(())
         }
 
-        /// Função para atualizar os detalhes de uma venda.
-        #[pallet::call_index(8)]
-        #[pallet::weight(10_000)]
+        #[pallet::call_index(9)]
+		#[pallet::weight(10_000)]
         pub fn update_sale(origin: OriginFor<T>, code: u64, seller: Option<Vec<u8>>, date: Option<Date>, payment_method: Option<PaymentMethod>) -> DispatchResult {
             let _who = ensure_signed(origin)?;
 
@@ -376,9 +397,8 @@ pub mod pallet {
             Ok(())
         }
 
-        /// Função para remover uma venda.
-        #[pallet::call_index(9)]
-        #[pallet::weight(10_000)]
+        #[pallet::call_index(10)]
+		#[pallet::weight(10_000)]
         pub fn remove_sale(origin: OriginFor<T>, code: u64) -> DispatchResult {
             let _who = ensure_signed(origin)?;
 
