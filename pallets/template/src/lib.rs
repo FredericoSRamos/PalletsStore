@@ -43,9 +43,9 @@ pub mod pallet {
     /// Estrutura que define uma data (dia, mês, ano).
     #[derive(Clone, Encode, Decode, Debug, TypeInfo, Default, PartialEq, MaxEncodedLen)]
     pub struct Date {
-        day: u8,
-        month: u8,
-        year: u64
+        pub day: u8,
+        pub month: u8,
+        pub year: u64
     }
 
     impl Date {
@@ -96,7 +96,7 @@ pub mod pallet {
         pub products: Vec<u64>,
         pub value: u64,
         date: Date,
-        payment_method: PaymentMethod
+        pub payment_method: PaymentMethod
     }
 
     impl MaxEncodedLen for Sale {
@@ -107,6 +107,10 @@ pub mod pallet {
         
             seller_length + date_length + payment_method_length + 96
         }
+    }
+
+    pub fn total_max_encoded_len() -> usize {
+        Sale::max_encoded_len() + Product::max_encoded_len()
     }
 
     #[pallet::pallet]
